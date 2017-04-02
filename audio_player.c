@@ -38,7 +38,7 @@ alt_up_audio_dev * audio_dev;
 volatile long p1;
 volatile int fifospace;
 
-volatile int bufferIndex = 0;
+int bufferIndex = 0;
 
 
 volatile char filename[20][13];
@@ -246,12 +246,12 @@ void seek_backwards() {
 			res = f_read(&File1, Buff, cnt, &cnt);
 			bufferIndex = 508; // 512 - 4
 		}
-		else if (bufferIndex >= cnt) { // reached the end of the song / file
+		else if (bufferIndex < 0) { // reached the beginning of the song / file
 			res = f_lseek(&File1, 0);
 			res = f_read(&File1, Buff, cnt, &cnt);
-//			bufferIndex = 0;
 			playing = 0;
 			stop();
+			debounce(7); // done so user does not immediately seek backwards when song is done
 			return;
 		}
 		// writing
@@ -285,9 +285,10 @@ int main(void){
 			case 7: // seek / backwards
     			if (playing == 1) {
     				seek_backwards();
+//    				debounce(14);
     			} else {
 					skipBackward();
-	    			debounce(14);
+	    			debounce(7);
     			}
 				break;
     		case 11: // stop
@@ -338,4 +339,3 @@ int main(void){
     }
 	return 0;
 }
-
