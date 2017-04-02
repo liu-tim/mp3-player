@@ -38,7 +38,7 @@ alt_up_audio_dev * audio_dev;
 volatile long p1;
 volatile int fifospace;
 
-volatile int buffIndex = 0;
+volatile int bufferIndex = 0;
 
 
 volatile char filename[20][13];
@@ -99,6 +99,20 @@ void put_rc(FRESULT rc)
     xprintf("rc=%u FR_%s\n", (uint32_t) rc, str);
 }
 
+void init() {
+	// open up display
+	display = fopen("/dev/lcd_display", "w");
+	// open the Audio port
+	audio_dev = alt_up_audio_open_dev ("/dev/Audio");
+	if ( audio_dev == NULL)
+	alt_printf ("Error: could not open audio device \n");
+	else
+	alt_printf ("Opened audio device \n");
+	IoInit();
+	xprintf("rc=%d\n", (uint16_t) disk_initialize((uint8_t) 0)); // di	--  0 == p1
+	put_rc(f_mount((uint8_t) 0, &Fatfs[0])); // fi	-- 0 == p1
+	fileList(); // sets up file system
+}
 
 int isWav(char *filename){
 	int len = strlen(filename);
@@ -153,56 +167,41 @@ void stop () {
 	return;
 }
 
-void play() {
+void play(int speed) {
 	unsigned int l_buf;
 	unsigned int r_buf;
+	int inc = speed * 4;
 	uint8_t res;
     ofs = File1.fptr;
+//    printf("%i %i\n", bufferIndex, cnt);
     if ((uint32_t) p1 >= 0) { // song has not ended
     	// refilling buffer
-		if (buffIndex >= cnt && (uint32_t) p1 >= 512) {//what does buffIndex >= cnt do
+		if (bufferIndex >= cnt && (uint32_t) p1 >= 512) {
 			cnt = 512;
 			p1 -= 512;
 			res = f_read(&File1, Buff, cnt, &cnt);
-			buffIndex = 0;
+			bufferIndex = 0;
 
-		} else if (buffIndex >= cnt) { // reached the end of the song / file
-			xprintf("END OF SONG");
+		} else if (bufferIndex >= cnt) { // reached the end of the song / file
 			cnt = p1;
 			p1 = 0;
 			res = f_read(&File1, Buff, cnt, &cnt);
-			buffIndex = 0;
+			bufferIndex = 0;
 			playing = 0;
 			stop();
-			return;
 		}
 		// writing
 		fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
 		if (fifospace > 0) {
-			l_buf = Buff[buffIndex] | Buff[buffIndex + 1] << 8;
-			r_buf = Buff[buffIndex + 2] | Buff[buffIndex + 3] << 8;
+			l_buf = Buff[bufferIndex] | Buff[bufferIndex + 1] << 8;
+			r_buf = Buff[bufferIndex + 2] | Buff[bufferIndex + 3] << 8;
 			// write audio buffer
 			alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
 			alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
-			buffIndex +=4;
+			bufferIndex +=inc;
 		}
-
     }
     return;
-//
-//	while (p1) {
-//		fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
-//		if (fifospace > 0) {
-//			l_buf = Buff[buffIndex] | Buff[buffIndex + 1] << 8;
-//			r_buf = Buff[buffIndex + 2] | Buff[buffIndex + 3] << 8;
-//			buffIndex +=4;
-//			// write audio buffer
-//			alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
-//			alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
-//		}
-//
-//	}
-//	playing = 0;
 }
 
 void printDisplay() {
@@ -216,42 +215,6 @@ void skipForward() {
 	printDisplay();
 }
 
-void fastForwards() {
-	unsigned int l_buf;
-	unsigned int r_buf;
-	uint8_t res;
-    ofs = File1.fptr;
-    if ((uint32_t) p1 >= 0) { // song has not ended
-    	// refilling buffer
-		if (buffIndex >= cnt && (uint32_t) p1 >= 512) {//what does buffIndex >= cnt do
-			cnt = 512;
-			p1 -= 512;
-			res = f_read(&File1, Buff, cnt, &cnt);
-			buffIndex = 0;
-
-		} else if (buffIndex >= cnt) { // reached the end of the song / file
-			xprintf("END OF SONG");
-			cnt = p1;
-			p1 = 0;
-			res = f_read(&File1, Buff, cnt, &cnt);
-			buffIndex = 0;
-			playing = 0;
-			stop();
-			return;
-		}
-		// writing
-		fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
-		if (fifospace > 0) {
-			l_buf = Buff[buffIndex] | Buff[buffIndex + 1] << 8;
-			r_buf = Buff[buffIndex + 2] | Buff[buffIndex + 3] << 8;
-			// write audio buffer
-			alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
-			alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
-			buffIndex +=8;
-		}
-    }
-}
-
 void skipBackward() {
 	fileIndex = (fileIndex > 0) ? fileIndex - 1 : 12;
 	loadFile();
@@ -259,20 +222,51 @@ void skipBackward() {
 	printDisplay();
 }
 
-void init() {
-	// open up display
-	display = fopen("/dev/lcd_display", "w");
-	// open the Audio port
-	audio_dev = alt_up_audio_open_dev ("/dev/Audio");
-	if ( audio_dev == NULL)
-	alt_printf ("Error: could not open audio device \n");
-	else
-	alt_printf ("Opened audio device \n");
-	IoInit();
-	xprintf("rc=%d\n", (uint16_t) disk_initialize((uint8_t) 0)); // di	--  0 == p1
-	put_rc(f_mount((uint8_t) 0, &Fatfs[0])); // fi	-- 0 == p1
-	fileList(); // sets up file system
+void seek_forwards() {
+	play(2); // play at 2x speed
 }
+
+/*
+ *  Reverse: play in forward direction for a bit then go back
+ */
+void seek_backwards() {
+	unsigned int l_buf;
+	unsigned int r_buf;
+	uint8_t res;
+    ofs = File1.fptr;
+
+	// going backwards now instead of forwards for bufferIndex
+    if ((uint32_t) p1 < fileSize[fileIndex]) { // song can be reversed (not at beginning)
+    	// refilling buffer
+    	int diff = fileSize[fileIndex] - (uint32_t) p1; // get how much space left to reverse
+		if (bufferIndex < 0 && diff > 512) {
+			cnt = 512;
+			p1 += 512;
+			res = f_lseek(&File1, fileSize[fileIndex]-p1);
+			res = f_read(&File1, Buff, cnt, &cnt);
+			bufferIndex = 508; // 512 - 4
+		}
+		else if (bufferIndex >= cnt) { // reached the end of the song / file
+			res = f_lseek(&File1, 0);
+			res = f_read(&File1, Buff, cnt, &cnt);
+//			bufferIndex = 0;
+			playing = 0;
+			stop();
+			return;
+		}
+		// writing
+		fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
+		if (fifospace > 0) {
+			l_buf = Buff[bufferIndex] | Buff[bufferIndex + 1] << 8;
+			r_buf = Buff[bufferIndex + 2] | Buff[bufferIndex + 3] << 8;
+			// write audio buffer
+			alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
+			alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
+			bufferIndex -= 4;
+		}
+    }
+}
+
 
 int main(void){
 	init();
@@ -282,18 +276,19 @@ int main(void){
 	char button;
 	uint8_t res;
     loadFile();
-    buffIndex = 0;
-//    play();
+    bufferIndex = 0;
 	printDisplay();
 
     while(1) { // tight polling
     	button = IORD(BUTTON_PIO_BASE,0);
     	switch (button) {
 			case 7: // seek / backwards
-				if (playing == 0) {
+    			if (playing == 1) {
+    				seek_backwards();
+    			} else {
 					skipBackward();
-					debounce(7);
-				}
+	    			debounce(14);
+    			}
 				break;
     		case 11: // stop
     			playing = 0;
@@ -309,49 +304,35 @@ int main(void){
     				printDisplay();
     			} else { // playing code
     				playing = 1;
-
-    				//playing = 1;
-    				if ((uint32_t) p1 >= 512) {
-						cnt = 512;
-						p1 -= 512;
-					} else {
-						cnt = p1;
-						p1 = 0;
-					}
     				res = f_read(&File1, Buff, cnt, &cnt);
-    				// change this to for loop?
-    				// fill buffer
-
-    				for (buffIndex = 0; buffIndex < 512;){
+    				bufferIndex = 0;
+    				while (bufferIndex < 512){ // plays first word or else we get distortion
         				unsigned int l_buf;
         				unsigned int r_buf;
     					fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
     					if (fifospace > 0) {
-    						l_buf = Buff[buffIndex] | Buff[buffIndex + 1] << 8;
-    						r_buf = Buff[buffIndex + 2] | Buff[buffIndex + 3] << 8;
+    						l_buf = Buff[bufferIndex] | Buff[bufferIndex + 1] << 8;
+    						r_buf = Buff[bufferIndex + 2] | Buff[bufferIndex + 3] << 8;
     						// write audio buffer
     						alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
     						alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
-    						buffIndex +=4;
+    						bufferIndex +=4;
     					}
     				}
-    				// add playing  = 1 here?
-    				printDisplay();
     			}
     			debounce(13);
     			break;
     		case 14: // seek / forward
-    			if (playing == 0) {
-					skipForward();
-    			}
     			if (playing == 1) {
-    				fastForwards();
-    				debounce(14);
+    				seek_forwards();
+    			} else {
+					skipForward();
+	    			debounce(14);
     			}
     			break;
     		default:
     			if (playing) {
-    				play();
+    				play(1);
     			}
     	}
     }
