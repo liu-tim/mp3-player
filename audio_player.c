@@ -217,9 +217,39 @@ void skipForward() {
 }
 
 void fastForwards() {
-	if (playing) {
-		buffIndex += 8;
-	}
+	unsigned int l_buf;
+	unsigned int r_buf;
+	uint8_t res;
+    ofs = File1.fptr;
+    if ((uint32_t) p1 >= 0) { // song has not ended
+    	// refilling buffer
+		if (buffIndex >= cnt && (uint32_t) p1 >= 512) {//what does buffIndex >= cnt do
+			cnt = 512;
+			p1 -= 512;
+			res = f_read(&File1, Buff, cnt, &cnt);
+			buffIndex = 0;
+
+		} else if (buffIndex >= cnt) { // reached the end of the song / file
+			xprintf("END OF SONG");
+			cnt = p1;
+			p1 = 0;
+			res = f_read(&File1, Buff, cnt, &cnt);
+			buffIndex = 0;
+			playing = 0;
+			stop();
+			return;
+		}
+		// writing
+		fifospace = alt_up_audio_write_fifo_space(audio_dev, ALT_UP_AUDIO_RIGHT);
+		if (fifospace > 0) {
+			l_buf = Buff[buffIndex] | Buff[buffIndex + 1] << 8;
+			r_buf = Buff[buffIndex + 2] | Buff[buffIndex + 3] << 8;
+			// write audio buffer
+			alt_up_audio_write_fifo (audio_dev, &(l_buf), 1, ALT_UP_AUDIO_LEFT);
+			alt_up_audio_write_fifo (audio_dev, &(r_buf), 1, ALT_UP_AUDIO_RIGHT);
+			buffIndex +=8;
+		}
+    }
 }
 
 void skipBackward() {
@@ -260,8 +290,10 @@ int main(void){
     	button = IORD(BUTTON_PIO_BASE,0);
     	switch (button) {
 			case 7: // seek / backwards
-				skipBackward();
-    			debounce(7);
+				if (playing == 0) {
+					skipBackward();
+					debounce(7);
+				}
 				break;
     		case 11: // stop
     			playing = 0;
@@ -309,8 +341,13 @@ int main(void){
     			debounce(13);
     			break;
     		case 14: // seek / forward
-    			skipForward();
-    			debounce(14);
+    			if (playing == 0) {
+					skipForward();
+    			}
+    			if (playing == 1) {
+    				fastForwards();
+    				debounce(14);
+    			}
     			break;
     		default:
     			if (playing) {
